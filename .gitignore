@@ -1,0 +1,15 @@
+._*
+.DS_Store
+.venv/
+__pycache__/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+PLAN-REVIEW-LOG.md
+app/node_modules/
+app/dist/
+app/build-resources/python/
+app/.cache/
+._*
+.DS_Store

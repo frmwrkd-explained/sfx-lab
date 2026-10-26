@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sfx-lab"
+version = "0.1.0"
+description = "A local sound-effect Studio that learns your taste from star ratings."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{name = "FRMWRKD"}]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+sfx-lab = "sfx_lab.cli:main"
+
+[tool.hatch.build]
+exclude = ["._*", "**/._*", ".venv", ".pytest_cache", "__pycache__"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sfx_lab"]
+include = ["src/sfx_lab/**/*.py", "src/sfx_lab/studio/**"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

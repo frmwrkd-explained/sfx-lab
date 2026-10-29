@@ -11,5 +11,3 @@ app/node_modules/
 app/dist/
 app/build-resources/python/
 app/.cache/
-._*
-.DS_Store

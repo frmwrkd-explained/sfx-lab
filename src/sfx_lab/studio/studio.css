@@ -341,3 +341,41 @@ button:disabled { cursor: default; opacity: .5; }
 .player { grid-template-columns:auto minmax(160px,260px) minmax(0,1fr) auto auto auto; }
 #settingsForm .row2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:end; }
 @media (max-width:760px) { .player { grid-template-columns:auto minmax(0,1fr) auto; } }
+
+/* ---------- cue sheet: the edit, its cues on a timeline, and each cue's takes ---------- */
+.cue-stage { flex: none; display: grid; place-items: center; background: #000; border-bottom: 1px solid var(--line-soft); padding: 12px; }
+.cue-stage video { display: block; width: auto; max-width: 100%; max-height: 42vh; aspect-ratio: 16 / 9; background: #000; border-radius: 6px; }
+.cue-stage .empty { color: var(--faint); font-size: 12.5px; padding: 48px 0; }
+.cue-time { font: 12px/1 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cue-track { flex: none; margin: 0 14px; padding: 4px 0 8px 46px; cursor: pointer; user-select: none; }
+.cue-inner { position: relative; padding-top: 18px; }
+.cue-ruler { position: absolute; left: 0; right: 0; top: 0; height: 18px; }
+.cue-ruler span { position: absolute; top: 4px; transform: translateX(-50%); font: 10px/1 var(--mono); color: var(--faint); }
+.cue-lane { position: relative; height: 26px; border-radius: 6px; background: var(--panel); border: 1px solid var(--line-soft); margin-bottom: 6px; }
+.cue-lane .lane-l { position: absolute; right: calc(100% + 8px); top: 50%; transform: translateY(-50%); font: 500 9.5px/1 var(--mono); text-transform: uppercase; letter-spacing: .07em; color: var(--faint); pointer-events: none; }
+.cue-chip { all: unset; position: absolute; top: 3px; bottom: 3px; min-width: 5px; border-radius: 4px; cursor: pointer; overflow: hidden; white-space: nowrap;
+  font: 500 10.5px/18px var(--sans); padding: 0 5px; color: #0b0d10; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .25); }
+.cue-chip.need { background: transparent !important; color: var(--muted); box-shadow: inset 0 0 0 1px var(--faint); border: 1px dashed var(--faint); }
+.cue-chip.sel { box-shadow: 0 0 0 2px var(--accent); z-index: 2; }
+.cue-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cue-head { position: absolute; top: 12px; bottom: 0; width: 2px; margin-left: -1px; background: var(--fg); pointer-events: none; z-index: 3; }
+.cue-head::before { content: ""; position: absolute; top: -4px; left: -4px; width: 10px; height: 6px; border-radius: 2px; background: var(--fg); }
+.cue-cols { display: grid; grid-template-columns: 40px 86px 92px minmax(0, 1fr) 104px 64px; align-items: center; column-gap: 14px; padding: 0 14px; }
+.cue-row { height: 48px; border-bottom: 1px solid var(--line-soft); position: relative; }
+.cue-row:hover { background: var(--hover); }
+.cue-row.sel { background: var(--sel); }
+.cue-row.sel::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent); }
+.cue-row .p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cue-row .tk { font: 11.5px var(--mono); color: var(--faint); text-align: right; }
+.ev { font: 500 10px/1 var(--mono); text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.take-list { display: grid; gap: 6px; }
+.take { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
+.take.on { border-color: var(--accent); background: var(--accent-soft); }
+.take .p { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.take .src { font: 10.5px var(--mono); color: var(--faint); }
+.take .use { grid-column: 2 / -1; justify-self: start; }
+@media (max-width: 860px) {
+  .cue-cols { grid-template-columns: 34px 70px minmax(0, 1fr) 96px; }
+  .cue-cols .c-ev, .cue-cols .c-tk { display: none; }
+  .cue-stage video { max-height: 32vh; }
+}

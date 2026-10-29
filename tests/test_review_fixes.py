@@ -12,7 +12,7 @@ from sfx_lab import run as workflow
 from sfx_lab.context import hot_card, hot_values
 from sfx_lab.lab import Lab, read_text, write_json
 from sfx_lab.projects import get_project
-from sfx_lab.prompts import learn_prompt
+from sfx_lab.prompts import SFX_PROMPT_RULES, learn_prompt, plan_prompt
 from sfx_lab.studio import Studio
 from sfx_lab.tags import tags_for
 from sfx_lab.taste import read_taste, write_auto
@@ -52,6 +52,13 @@ EXPECTED_HOT = {
     'Avoid': 'synth tones · long tails · musical chimes',
     'Open': 'glass vs metal clicks? · longer whooshes at low influence?',
 }
+
+
+def test_plan_prompt_carries_sfx_prompt_rules(lab: Lab) -> None:
+    prompt = plan_prompt(read_taste(lab.taste_path), '', [], 'tech whooshes', 'whoosh', 4, 0.25)
+    assert SFX_PROMPT_RULES in prompt
+    for rule in ('The use first', 'same number as duration_s', '"isolated, clean"', 'no voice', '450-character'):
+        assert rule in SFX_PROMPT_RULES
 
 
 def test_review_learn_prompt_has_filled_hot_example(lab: Lab) -> None:

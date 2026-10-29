@@ -96,6 +96,21 @@ def parser() -> argparse.ArgumentParser:
     reuse.add_argument("brief")
     reuse.add_argument("-n", type=int, default=3)
     reuse.add_argument("--generate", action="store_true")
+    score = commands.add_parser("score", help="Sound-design an edit and export a stem, video and cue markers")
+    score.add_argument("video", type=Path, nargs="?")
+    score.add_argument("--project", dest="score_project", metavar="SLUG")
+    score.add_argument("--no-agent", action="store_true")
+    score.add_argument("--plan-only", action="store_true", help="Save the cue sheet and estimate without generating")
+    score.add_argument("--resume", metavar="SCORE_ID", help="Run the saved cue sheet without replanning")
+    score.add_argument("--sfx-model", choices=("v3", "v2"))
+    _run_options(score)
+    line = commands.add_parser("line", help="Add speech from an existing ElevenLabs voice to the latest score")
+    line.add_argument("text")
+    line.add_argument("--voice", required=True, metavar="VOICE_ID")
+    line.add_argument("--at", required=True, metavar="TIMECODE")
+    line.add_argument("--project", dest="score_project", metavar="SLUG")
+    line.add_argument("--score", dest="score_id", metavar="SCORE_ID")
+    _run_options(line)
     return result
 
 
@@ -114,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         lab = locate_lab(args.lab)
         load_env(lab)
-        lab = select_project(lab, getattr(args, "context_project", None) or args.project)
+        lab = select_project(lab, getattr(args, "context_project", None) or getattr(args, "score_project", None) or args.project)
         if args.command in ("plan", "batch"):
             data = plan(lab, args.brief, args.n, args.kind, args.specs, emit=_emit,
                         verbose=args.verbose, from_id=args.from_id, feedback=args.feedback)
@@ -182,6 +197,23 @@ def main(argv: list[str] | None = None) -> int:
             need(lab, args.brief, args.n, args.generate, emit=_emit)
         elif args.command == "status":
             _emit(status(lab))
+        elif args.command == "score":
+            from .score import execute_score, load_score, plan_score, print_plan
+            if args.resume:
+                if args.video or args.no_agent or args.sfx_model:
+                    raise ValueError("--resume uses the saved video, cues and model; omit video, --no-agent and --sfx-model.")
+                data = load_score(lab, args.resume)
+                if args.plan_only:
+                    print_plan(data, _emit)
+            elif args.video:
+                data = plan_score(lab, args.video, args.no_agent, emit=_emit, sfx_model=args.sfx_model)
+            else:
+                raise ValueError("Choose a video or use --resume <score-id>.")
+            if not args.plan_only:
+                execute_score(lab, data["id"], args.yes, args.max_usd, emit=_emit)
+        elif args.command == "line":
+            from .score import add_line
+            add_line(lab, args.text, args.voice, args.at, args.score_id, args.yes, args.max_usd, emit=_emit)
         return 0
     except SystemExit as error:
         return 0 if error.code == 0 else 1

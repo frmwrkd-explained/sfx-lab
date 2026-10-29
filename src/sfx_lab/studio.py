@@ -180,9 +180,9 @@ class Studio:
     def start_job(self, kind: str, action: Callable[[Callable[[dict[str, Any]], None]], Any],
                   total: int = 1) -> dict[str, Any]:
         with self.lock:
-            category = "generation" if kind == "run" else "agent"
+            category = "generation" if kind in ("run", "score-render") else "agent"
             busy = any(j["state"] in ("queued", "running") and
-                       ("generation" if j["kind"] == "run" else "agent") == category for j in self.jobs.values())
+                       ("generation" if j["kind"] in ("run", "score-render") else "agent") == category for j in self.jobs.values())
             if busy:
                 raise APIError(409, "A batch is already generating" if category == "generation" else "An agent job is already running")
             job = {"project": self.lab.project, "id": secrets.token_urlsafe(12), "kind": kind, "state": "queued", "progress": 0,
@@ -217,6 +217,8 @@ class Studio:
 
     def _dispatch(self, method: str, path: str, data: dict[str, Any]) -> Any:
         lab = self.lab
+        if path == "/api/scores" or path.startswith("/api/scores/"):
+            return self.score_dispatch(method, path, data)
         if path == "/api/projects":
             if method == "GET":
                 return list_projects(lab)
@@ -320,6 +322,67 @@ class Studio:
             return {"ok": True}
         raise APIError(404, "API route not found.")
 
+    def score_dispatch(self, method: str, path: str, data: dict[str, Any]) -> Any:
+        from .score import cue_by_id, list_scores, load_score, more_takes, render_score, swap_take
+        lab = self.lab
+        if method == "GET" and path == "/api/scores":
+            return {"project": lab.project, "scores": list_scores(lab)}
+        match = re.fullmatch(r"/api/scores/(score-[a-z0-9-]+)(?:/(cues|render)(?:/(cue-\d+)(?:/(take|rate|swap|more))?)?)?", path)
+        if not match:
+            raise APIError(404, "Score route not found.")
+        ident, section, cue_id, action = match.groups()
+        try:
+            score = load_score(lab, ident)
+        except ValueError as error:
+            raise APIError(404, str(error)) from error
+
+        def enriched(cue: dict[str, Any]) -> dict[str, Any]:
+            takes = [self.sound(take) for take in cue["take_ids"]]
+            return cue | {"takes": takes, "take": next((t for t in takes if t["id"] == cue["take_id"]), None)}
+
+        if method == "GET" and section is None:
+            # The Cue sheet view plays the edit itself, before and after scoring.
+            media = {kind: f"/score-media/{ident}/{kind}" for kind in ("source", "video", "stem")
+                     if (lab.safe_path(score["source"] if kind == "source" else score["outputs"][kind])).is_file()}
+            return score | {"cues": [enriched(c) for c in score["cues"]], "media": media}
+        if method == "GET" and section == "cues" and cue_id is None:
+            return {"score": ident, "project": lab.project, "render_dirty": score["render_dirty"],
+                    "cues": [enriched(c) for c in score["cues"]]}
+        if method == "POST" and section == "render" and cue_id is None:
+            if any(not c.get("take_id") for c in score["cues"]):
+                raise APIError(409, "Generate or swap the missing takes before rendering.")
+            return self.start_job("score-render", lambda cb: render_score(lab, ident, emit=lambda _: None))
+        if section != "cues" or cue_id is None:
+            raise APIError(404, "Score route not found.")
+        try:
+            cue = cue_by_id(score, cue_id)
+        except ValueError as error:
+            raise APIError(404, str(error)) from error
+        take_id = data.get("take_id", cue["take_id"])
+        if action in ("take", "rate"):
+            if not take_id or take_id not in cue["take_ids"]:
+                raise APIError(404, "Take is not attached to this cue.")
+            if method == "GET" and action == "take":
+                return self.sound(take_id)
+            if method == "POST" and action == "rate":
+                if "stars" not in data:
+                    raise APIError(400, "Stars are required (null clears the rating).")
+                return self.rate({"id": take_id, "stars": data["stars"], **({"note": data["note"]} if "note" in data else {})})
+        if method == "POST" and action == "more":
+            result = more_takes(lab, ident, cue_id)
+            updated = result["score"]
+            return {"score": ident, "render_dirty": updated["render_dirty"],
+                    "cue": enriched(cue_by_id(updated, cue_id)), "added": result["added"]}
+        if method == "POST" and action == "swap":
+            if any(j["kind"] == "score-render" and j["state"] in ("queued", "running") for j in self.jobs.values()):
+                raise APIError(409, "A score is rendering; wait before swapping takes.")
+            take_id = data.get("take_id")
+            if not isinstance(take_id, str):
+                raise APIError(400, "Choose a take id from the sound library.")
+            swapped = swap_take(lab, ident, cue_id, take_id)
+            return {"score": ident, "render_dirty": True, "cue": enriched(cue_by_id(swapped, cue_id))}
+        raise APIError(404, "Score route not found.")
+
 
 class StudioServer(ThreadingHTTPServer):
     daemon_threads = True
@@ -372,6 +435,26 @@ class Handler(BaseHTTPRequestHandler):
         types = {".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg", ".flac": "audio/flac", ".m4a": "audio/mp4"}
         if file.suffix.lower() not in types:
             raise APIError(404, "Audio file not found.")
+        self._stream(file, types[file.suffix.lower()])
+
+    def _score_media(self, path: str) -> None:
+        from .score import load_score
+        lab = self.server.studio.lab
+        match = re.fullmatch(r"/score-media/(score-[a-z0-9-]+)/(source|video|stem)", path)
+        if not match:
+            raise APIError(404, "Media not found.")
+        ident, kind = match.groups()
+        try:
+            score = load_score(lab, ident)
+        except ValueError as error:
+            raise APIError(404, "Media not found.") from error
+        file = lab.safe_path(score["source"] if kind == "source" else score["outputs"][kind])
+        types = {".mp4": "video/mp4", ".mov": "video/quicktime", ".m4v": "video/mp4", ".webm": "video/webm", ".wav": "audio/wav"}
+        if not file.is_file() or file.suffix.lower() not in types:
+            raise APIError(404, "Media not found.")
+        self._stream(file, types[file.suffix.lower()])
+
+    def _stream(self, file: Path, mime: str) -> None:
         size = file.stat().st_size
         start, end, status = 0, size - 1, 200
         extra = {"Accept-Ranges": "bytes"}
@@ -392,7 +475,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
         # Stream only the requested bytes; long ambiences need not fit in memory.
         self.send_response(status)
-        for key, value in {"Content-Type": types[file.suffix.lower()], "Content-Length": str(max(0, end - start + 1)),
+        for key, value in {"Content-Type": mime, "Content-Length": str(max(0, end - start + 1)),
                            "Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff", **extra}.items():
             self.send_header(key, value)
         self.end_headers()
@@ -439,6 +522,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._static(path)
             elif self.command == "GET" and path.startswith("/audio/"):
                 self._audio(path)
+            elif self.command == "GET" and path.startswith("/score-media/"):
+                self._score_media(path)
             else:
                 raise APIError(404, "Route not found.")
         except APIError as error:

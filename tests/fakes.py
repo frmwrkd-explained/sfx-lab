@@ -40,3 +40,25 @@ class FakeAgent:
     def ask(self, prompt: str) -> str:
         self.prompts.append(prompt)
         return next(self.responses)
+
+
+class ScoreGenerator(FakeGenerator):
+    """A non-silent, duration-aware fake so placement and ducking are measurable."""
+
+    def generate(self, spec: dict[str, Any], dest: Path) -> dict[str, Any]:
+        import array
+        import math
+        import sys
+        self.calls.append(spec)
+        if spec['prompt'] == 'fail':
+            raise RuntimeError('deliberate failure')
+        path = dest.with_suffix('.wav')
+        duration = spec.get('duration_s') or .7
+        samples = array.array('h', (int(12000 * math.sin(2 * math.pi * 400 * n / 48000))
+                                    for n in range(round(48000 * duration))))
+        if sys.byteorder != 'little':
+            samples.byteswap()
+        with wave.open(str(path), 'wb') as wav:
+            wav.setparams((1, 2, 48000, 0, 'NONE', 'not compressed'))
+            wav.writeframes(samples.tobytes())
+        return {'path': str(path), 'ref': dest.name, 'cost_usd': .01}

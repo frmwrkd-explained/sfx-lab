@@ -258,7 +258,13 @@ def test_studio_project_settings_and_find_endpoints(server: Any, studio_lab: Lab
     assert request(server, '/api/settings', {'defaults': {'batch_size': -1}}, 'PUT')[0] == 400
     status, _, connected = request(server, '/api/settings/keys', {'elevenlabs': 'offline-test-credential-a', 'anthropic': 'offline-test-credential-b'}, 'PUT')
     assert status == 200 and connected == {'elevenlabs': 'connected', 'anthropic': 'connected'}
-    assert stat.S_IMODE((studio_lab.root / '.env').stat().st_mode) == 0o600
+    # exFAT ignores chmod; still assert the requested mode on filesystems that enforce it.
+    probe = studio_lab.root / 'mode-probe'
+    probe.touch()
+    probe.chmod(0o600)
+    if stat.S_IMODE(probe.stat().st_mode) == 0o600:
+        assert stat.S_IMODE((studio_lab.root / '.env').stat().st_mode) == 0o600
+    probe.unlink()
     for route in ('/api/settings', '/api/state', '/api/projects'):
         assert 'offline-test-credential-' not in json.dumps(request(server, route)[2])
     assert request(server, '/api/settings/keys', {'elevenlabs': 'one\ntwo'}, 'PUT')[0] == 400

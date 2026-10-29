@@ -3,6 +3,20 @@
 from .ratings import Event, example
 from .taste import Taste
 
+# Shared by the plan and score agents. Learned 2026-10-28 from ElevenLabs Explore
+# download counts, the official sound-effects docs (450-character prompt limit,
+# prompt influence default 0.3) and our own P1-P4 prompt ladder.
+SFX_PROMPT_RULES = """How to write each ElevenLabs prompt, in this order:
+- The use first: what the sound is for (transition for a hard cut, UI tap, logo reveal, bed under a voiceover).
+- The length in seconds, the same number as duration_s; leave numbers out when duration_s is null. Under 0.5 s, write e.g. "0.2 seconds then silence" and use 0.5.
+- The source with its material and size, then the shape: attack (crisp, soft) and tail (short dry tail, cut to silence).
+- Where the weight sits when it matters: sub, low-mid body, bright, no highs.
+- One source per prompt. A sound with phases gets a short timeline in order, e.g. "0 to 3 s: air swell. At 3 s: one deep hit."
+- End with "isolated, clean" and exclusions: no music (unless asked), no voice, plus anything unwanted the model tends to add (reverb, metallic ring, laser).
+- Beds and ambiences: loop true, an even texture with no distinct hits; the word "loopable" does nothing.
+- prompt_influence: 0.2 to 0.3 to explore variations; 0.5 to 0.7 for detailed, timed or UI sounds where every word must land.
+- Stay well under the 450-character ElevenLabs limit."""
+
 
 def plan_prompt(taste: Taste, stats_md: str, recent_prompts: list[str], brief: str,
                 kind: str, n: int, explore: float, hot: str = "", good: str = "", bad: str = "") -> str:
@@ -31,10 +45,11 @@ def plan_prompt(taste: Taste, stats_md: str, recent_prompts: list[str], brief: s
 ## Task
 Brief: {brief}
 Kind: {kind}
-Write exactly {n} sound specs for ElevenLabs Sound Effects v2.
+Write exactly {n} sound specs for ElevenLabs Sound Effects (v3 by default).
 - About {n - experiments} should follow their taste closely. The other {experiments} are experiments: each tests ONE open question from "Try next" or an untested setting. Set "explore": true on those and say in "why" what it tests.
 - Between related specs, change one thing at a time (wording, length, influence) so the ratings teach something.
 - prompt: a concrete physical description — source, material, action, space, mic distance, attack and tail. No brand names. No music unless the brief asks. Max 300 characters.
+{SFX_PROMPT_RULES}
 - duration_s: 0.5 to 30 seconds, or null to let the model choose.
 - prompt_influence: 0 to 1 (0 = loose and creative, 1 = literal).
 - Set `from` to the id you build on, if any.

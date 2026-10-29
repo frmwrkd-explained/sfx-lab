@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from sfx_lab.generators import ElevenLabs, load_generator
+from sfx_lab.generators import ElevenLabs, ElevenLabsTTS, load_generator
 from sfx_lab.spec import Spec
 from tests.fakes import FakeGenerator
 
@@ -28,7 +28,7 @@ def test_elevenlabs_request(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, dur
     assert Path(result["path"]).read_bytes() == b"fake mp3"
     assert Path(result["path"]).suffix == ".mp3" and result["ref"] == ""
     assert result["cost_usd"] == pytest.approx(0.12 * (duration or 5) / 60)
-    body = {"text": "click", "model_id": "eleven_text_to_sound_v2", "prompt_influence": 0.6, "loop": True}
+    body = {"text": "click", "model_id": "eleven_text_to_sound_v3", "prompt_influence": 0.6, "loop": True}
     if duration is not None:
         body["duration_seconds"] = duration
     assert seen == {"url": "https://api.elevenlabs.io/v1/sound-generation?output_format=mp3_44100_128", "headers": {"Xi-api-key": "fake-secret", "Content-type": "application/json"}, "body": body, "timeout": 180, "method": "POST"}
@@ -73,3 +73,40 @@ def test_loading_and_entry_point(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("importlib.metadata.entry_points", entries)
     assert isinstance(load_generator("registered"), FakeGenerator)
+
+
+def test_model_selection_and_v4_tts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv('ELEVENLABS_API_KEY', 'offline-test-key')
+    requests = []
+
+    def urlopen(request: urllib.request.Request, timeout: int) -> io.BytesIO:
+        requests.append((request.full_url, json.loads(request.data), timeout))
+        return io.BytesIO(b'fake audio')
+
+    monkeypatch.setattr(urllib.request, 'urlopen', urlopen)
+    load_generator('elevenlabs-v2').generate(Spec('hit', .6).to_dict(), tmp_path / 'v2')
+    assert requests[-1][1]['model_id'] == 'eleven_text_to_sound_v2'
+    assert load_generator('elevenlabs-v3').model_id == 'eleven_text_to_sound_v3'
+    tts = load_generator('elevenlabs-tts')
+    assert isinstance(tts, ElevenLabsTTS)
+    spec = {'prompt': 'Hello', 'voice_id': 'existing_voice'}
+    result = tts.generate(spec, tmp_path / 'speech')
+    assert requests[-1] == ('https://api.elevenlabs.io/v1/text-to-speech/existing_voice?output_format=mp3_44100_128',
+                            {'text': 'Hello', 'model_id': 'eleven_v4'}, 180)
+    assert result['cost_usd'] == pytest.approx(5 * .08 / 1000)
+    assert all('/voices/add' not in r[0] for r in requests)
+    with pytest.raises(ValueError, match='existing'):
+        tts.generate({'prompt': 'No', 'voice_id': '../bad'}, tmp_path / 'bad')
+    monkeypatch.delenv('ELEVENLABS_API_KEY')
+    with pytest.raises(RuntimeError, match='Set ELEVENLABS_API_KEY'):
+        tts.generate(spec, tmp_path / 'missing')
+
+
+def test_v4_error_redacts_key(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv('ELEVENLABS_API_KEY', 'offline-secret')
+    def urlopen(*args: Any, **kwargs: Any) -> Any:
+        raise urllib.error.HTTPError('https://fake', 429, 'quota', {}, io.BytesIO(b'{"detail":"offline-secret"}'))
+    monkeypatch.setattr(urllib.request, 'urlopen', urlopen)
+    with pytest.raises(RuntimeError, match='redacted') as error:
+        ElevenLabsTTS().generate({'prompt': 'Hello', 'voice_id': 'existing'}, tmp_path / 'no')
+    assert 'offline-secret' not in str(error.value)

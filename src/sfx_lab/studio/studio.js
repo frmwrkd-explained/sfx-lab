@@ -35,6 +35,8 @@ async function refresh() {
     if (s.features?.duration) audio.duration.set(s.id, s.features.duration);
   }
   layoutMap();
+  await loadScores().catch(e => toast(e.message));
+  if (st.view === "cues" && sc.id && !sc.rendering) await loadScore().catch(e => toast(e.message));
   if (!document.activeElement.matches("textarea")) renderAll(); else renderUpdate();
   $("#tasteAge").textContent = TASTE.updated || "—";
   for (const job of state.jobs) if (["queued", "running"].includes(job.state)) watchJob(job).catch(e => toast(e.message));
@@ -459,8 +461,189 @@ function renderInsights() {
   </div></div>`;
 }
 
+/* ============ cue sheet: a scored edit, its cues on a timeline, and the takes behind each cue ============ */
+const sc = { list: [], id: null, data: null, mode: "after", cue: null, rendering: false, loading: false, built: null };
+const EVENT_LABEL = { "cut": "Cut", "whoosh-in": "Whoosh", "impact": "Impact", "ui-pop": "UI pop", "riser": "Riser", "ambience-bed": "Bed", "voice-line": "Voice" };
+const BEDS = ["ambience-bed", "voice-line"];
+const evLabel = c => EVENT_LABEL[c.event_type] || c.event_type;
+const tc = s => { const m = Math.floor(s / 60); return `${m}:${(s - m * 60).toFixed(2).padStart(5, "0")}`; };
+const cueById = id => sc.data?.cues.find(c => c.id === id);
+async function loadScores() {
+  const value = await api("/api/scores");
+  sc.list = value.scores.sort((a, b) => a.created.localeCompare(b.created));
+  $("#cuesTab").hidden = !sc.list.length;
+  if (!sc.list.some(s => s.id === sc.id)) { sc.id = last(sc.list)?.id || null; sc.data = null; }
+  if (!sc.id && st.view === "cues") st.view = "library";
+}
+async function loadScore() {
+  if (!sc.id) return;
+  const data = await api(`/api/scores/${encodeURIComponent(sc.id)}`);
+  // A reused take can come from another project; make sure the player and stars can find it.
+  for (const t of data.cues.flatMap(c => c.takes)) if (t && !ALL_SOUNDS.some(s => s.id === t.id)) ALL_SOUNDS.push(soundModel(t));
+  sc.data = data;
+  if (!cueById(sc.cue)) sc.cue = data.cues[0]?.id || null;
+}
+function cueVideoSrc() {
+  const m = sc.data.media || {};
+  if (sc.mode === "after" && m.video) return m.video + "?v=" + encodeURIComponent(sc.data.rendered_at || "");
+  return m.source || "";
+}
+function cueBarHTML() {
+  const d = sc.data, cues = d.cues, missing = cues.filter(c => !c.take_id).length;
+  const rated = cues.filter(c => byId(c.take_id)?.rating).length;
+  const status = sc.rendering ? "" : missing ? `${missing} cue${missing > 1 ? "s" : ""} without a take` : d.render_dirty ? "Changes not rendered yet" : "Scored";
+  return `<div class="toolbar" id="cueBar">
+    ${sc.list.length > 1 ? `<div class="select"><select id="cueScore" aria-label="Scored edit">${sc.list.slice().reverse().map(s => `<option value="${esc(s.id)}" ${s.id === d.id ? "selected" : ""}>${esc(s.name)} · ${s.created.slice(5, 10).replace("-", "/")}</option>`).join("")}</select>${I.chev}</div>` : `<b>${esc(d.name)}</b>`}
+    <div class="seg"><button data-cmode="before" class="${sc.mode === "before" || !d.media?.video ? "on" : ""}">Before</button><button data-cmode="after" class="${sc.mode === "after" && d.media?.video ? "on" : ""}" ${d.media?.video ? "" : 'disabled title="Render the scored edit first"'}>After</button></div>
+    <span class="cue-time" id="cueTime">0:00.00 / ${tc(d.analysis.duration)}</span>
+    <span class="grow"></span><span class="count">${cues.length} cues · ${rated} rated</span>
+    ${status ? `<span class="state">${status}</span>` : ""}
+    ${sc.rendering ? `<button class="btn sm" disabled><span class="spinner"></span>Rendering…</button>`
+      : d.render_dirty || !d.media?.video ? `<button class="btn sm primary" id="renderBtn" ${missing ? "disabled" : ""}>Render scored edit</button>` : ""}
+  </div>`;
+}
+function cueTrackHTML() {
+  const d = sc.data, dur = d.analysis.duration || 1;
+  const step = [0.5, 1, 2, 5, 10, 15, 30, 60, 120].find(s => dur / s <= 12) || 300;
+  const ticks = Array.from({ length: Math.floor(dur / step) + 1 }, (_, i) => i * step);
+  const chip = c => {
+    const s = byId(c.take_id)?.rating || 0, need = !c.take_id;
+    return `<button class="cue-chip${need ? " need" : ""}${c.id === sc.cue ? " sel" : ""}" data-cue="${c.id}" style="left:${c.start / dur * 100}%;width:${Math.max(0, c.end - c.start) / dur * 100}%;background:${ratingColor(s)};color:${s ? "#0b0d10" : "var(--fg)"}" title="${tc(c.start)} · ${esc(evLabel(c))} · ${esc(c.prompt)}" aria-label="${esc(evLabel(c))} at ${tc(c.start)}">${esc(evLabel(c))}</button>`;
+  };
+  const hits = d.cues.filter(c => !BEDS.includes(c.event_type)), beds = d.cues.filter(c => BEDS.includes(c.event_type));
+  return `<div class="cue-inner" id="cueInner"><div class="cue-ruler">${ticks.map(t => `<span style="left:${t / dur * 100}%">${t >= 60 ? tc(t).replace(/\.00$/, "") : t + "s"}</span>`).join("")}</div>
+    <div class="cue-lane"><span class="lane-l">Hits</span>${hits.map(chip).join("")}</div>
+    ${beds.length ? `<div class="cue-lane"><span class="lane-l">Beds</span>${beds.map(chip).join("")}</div>` : ""}
+    <div class="cue-head" id="cueHead" style="left:0"></div></div>`;
+}
+function cueListHTML() {
+  return `<div class="cue-cols lhead"><span></span><span>Time</span><span class="c-ev">Event</span><span>Prompt</span><span>Rating</span><span class="r c-tk">Takes</span></div>` +
+    sc.data.cues.map(c => { const take = byId(c.take_id);
+      return `<div class="cue-cols cue-row${c.id === sc.cue ? " sel" : ""}" data-cue-row="${c.id}" tabindex="0" role="group" aria-label="${esc(evLabel(c))} at ${tc(c.start)}">
+        ${take?.audio_url ? `<button class="pb" data-play="${take.id}" aria-label="Play this cue's take">${I.play}</button>` : "<span></span>"}
+        <span class="cue-time">${tc(c.start)}</span><span class="ev c-ev">${esc(evLabel(c))}</span>
+        <div class="p" title="${esc(c.prompt)}">${esc(c.prompt)}</div>
+        ${take ? starsHTML(take) : `<span class="state${c.error ? " bad" : ""}">${esc(c.error || "Not made yet")}</span>`}
+        <span class="tk c-tk">${c.take_ids.length}</span></div>`; }).join("");
+}
+function syncCueHead() {
+  const v = $("#cueVideo"), head = $("#cueHead"); if (!v || !head || !sc.data) return;
+  const dur = sc.data.analysis.duration || v.duration || 1;
+  head.style.left = Math.min(100, v.currentTime / dur * 100) + "%";
+  $("#cueTime").textContent = `${tc(v.currentTime)} / ${tc(sc.data.analysis.duration)}`;
+}
+function seekCue(seconds) { const v = $("#cueVideo"); if (v) { v.currentTime = Math.max(0, seconds); syncCueHead(); } }
+function renderCues() {
+  const d = sc.data;
+  if (!d) {
+    $("#view").innerHTML = `<div class="state" style="padding:48px;text-align:center">${sc.id ? "Loading the cue sheet…" : "Sound-design an edit to see its cue sheet here."}</div>`;
+    sc.built = null;
+    if (sc.id && !sc.loading) { sc.loading = true; loadScore().then(renderAll, e => toast(e.message)).finally(() => { sc.loading = false; }); }
+    return;
+  }
+  const src = cueVideoSrc(), key = d.id + "|" + src;
+  // Rebuild the video only when the edit or its version changes, so refreshes never interrupt playback.
+  if (sc.built !== key || !$("#cueTrack")) {
+    $("#view").innerHTML = cueBarHTML() + `<div class="cue-stage">${src ? `<video id="cueVideo" src="${src}#t=0.001" controls playsinline preload="metadata"></video>` : `<div class="empty">The edit's video is missing.</div>`}</div>
+      <div class="cue-track" id="cueTrack" aria-label="Cue timeline">${cueTrackHTML()}</div><div class="scroll" id="cueList">${cueListHTML()}</div>`;
+    sc.built = key;
+    const v = $("#cueVideo");
+    if (v) {
+      let raf = 0;
+      const tick = () => { syncCueHead(); if (!v.paused) raf = requestAnimationFrame(tick); };
+      v.addEventListener("play", () => { media.pause(); cancelAnimationFrame(raf); tick(); });
+      v.addEventListener("timeupdate", syncCueHead); v.addEventListener("seeked", syncCueHead);
+    }
+    $("#cueTrack").addEventListener("pointerdown", e => {
+      if (e.target.closest("[data-cue]")) return;
+      const r = $("#cueInner").getBoundingClientRect();
+      seekCue(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * sc.data.analysis.duration);
+    });
+  } else {
+    $("#cueBar").outerHTML = cueBarHTML();
+    $("#cueTrack").innerHTML = cueTrackHTML();
+    const list = $("#cueList"), top = list.scrollTop; list.innerHTML = cueListHTML(); list.scrollTop = top;
+  }
+  syncCueHead();
+}
+function selectCue(id, seek) {
+  const c = cueById(id); if (!c) return;
+  sc.cue = id; if (c.take_id) st.sel = c.take_id;
+  renderAll();
+  if (seek) seekCue(c.start);
+  document.querySelector(`[data-cue-row="${id}"]`)?.scrollIntoView({ block: "nearest" });
+  if (innerWidth <= 1180) $("#main").classList.add("insp-open");
+}
+function renderCueInsp() {
+  const el = $("#insp"), c = cueById(sc.cue); if (!c) { el.innerHTML = ""; return; }
+  const take = byId(c.take_id);
+  const takeState = !take ? "No take yet" : !take.rating ? "Unrated" : take.rating === 1 ? "Swap this one: rated 1 star" : take.rating >= 4 ? "Favourite" : "Kept";
+  el.innerHTML = `<div class="i-in">
+    <div class="i-top"><div class="t"><div class="eyebrow">${esc(c.id)} · ${tc(c.start)} to ${tc(c.end)}</div><div class="i-title">${esc(evLabel(c))}</div></div>
+      <button class="icon-btn" id="inspClose" aria-label="Close details">${I.x}</button></div>
+    ${take ? `<div class="rate-big">${starsHTML(take, 24)}<span class="state${take.rating === 1 ? " bad" : ""}">${takeState}</span></div>` : `<div class="state${c.error ? " bad" : ""}">${esc(c.error || takeState)}</div>`}
+    <div class="block"><div class="eyebrow" style="margin-bottom:6px">Prompt</div><div class="i-prompt"><span id="promptText">${esc(c.prompt)}</span><button class="icon-btn" id="copyBtn" aria-label="Copy prompt">${I.copy}</button></div></div>
+    <dl class="spec"><dt>Starts</dt><dd>${tc(c.start)}</dd><dt>Length</dt><dd>${(c.end - c.start).toFixed(2)} s</dd>
+      <dt>Prompt influence</dt><dd>${(+c.prompt_influence).toFixed(2)}</dd><dt>Loop</dt><dd>${c.loop ? "On" : "Off"}</dd></dl>
+    ${c.takes.length ? `<div class="block"><div class="eyebrow" style="margin-bottom:6px">Takes</div><div class="take-list">${c.takes.map(t => takeHTML(byId(t.id) || soundModel(t), c)).join("")}</div></div>` : ""}
+    ${swapCandidates(c).length ? `<details class="adv"><summary>${I.chevr} Other sounds from your library</summary><div class="take-list" style="margin-top:8px">${swapCandidates(c).map(s => takeHTML(s, c)).join("")}</div></details>` : ""}
+    <div class="i-actions">${c.event_type === "voice-line" ? "" : sc.exhausted === c.id
+      ? `<span class="muted">No more like this</span><button class="btn sm" id="genCueBtn">Generate one…</button>`
+      : `<button class="btn sm" id="swapNextBtn" title="Swap for a similar take · S">⇄ Swap <kbd>S</kbd></button>`}
+      ${c.take_ids.indexOf(c.take_id) > 0 ? `<button class="btn sm ghost" id="swapBackBtn" title="Previous take · ⇧S">Back <kbd>⇧S</kbd></button>` : ""}
+      <button class="btn sm ghost" id="seekCueBtn">Jump to this cue</button></div>
+  </div>`;
+}
+// SPEC27 Swap: S steps through the cue's takes in order, asking the library for more at the end; ⇧S goes back.
+async function swapStep(dir) {
+  const c = cueById(sc.cue); if (!c || c.event_type === "voice-line" || sc.swapping) return;
+  const ids = c.take_ids, i = ids.indexOf(c.take_id);
+  if (dir === "back") return i > 0 ? swapCue(ids[i - 1]) : toast("This is the first take");
+  if (i >= 0 && i < ids.length - 1) return swapCue(ids[i + 1]);
+  sc.swapping = true;
+  try {
+    const r = await api(`/api/scores/${encodeURIComponent(sc.id)}/cues/${encodeURIComponent(c.id)}/more`, {});
+    const next = r.cue.take_ids[r.cue.take_ids.indexOf(c.take_id) + 1];
+    if (!r.added || !next) { sc.exhausted = c.id; renderAll(); return; }
+    await swapCue(next);
+  } catch (e) { toast(e.message); }
+  finally { sc.swapping = false; }
+}
+function takeHTML(s, c) {
+  const src = c.take_ids.includes(s.id) ? (s.project === serverState.project ? "Made for this edit" : "Reused from " + esc(s.project)) : esc(s.brief || s.project);
+  return `<div class="take${s.id === c.take_id ? " on" : ""}"><button class="pb" data-play="${s.id}" aria-label="Play take">${I.play}</button>
+    <div style="min-width:0"><div class="p" title="${esc(s.prompt)}">${esc(s.prompt)}</div><div class="src">${src} · ${s.rating ? s.rating + "★" : "unrated"}</div></div>
+    ${s.id === c.take_id ? '<span class="flag exp">In the mix</span>' : `<button class="btn sm use" data-swap="${s.id}">Use this take</button>`}</div>`;
+}
+// Sounds a cue could swap to: same family (effects never swap to speech), best rated and closest event type first.
+function swapCandidates(c) {
+  const speech = c.event_type === "voice-line";
+  return ALL_SOUNDS.filter(s => s.audio_url && !s.failed && s.rating !== 1 && !c.take_ids.includes(s.id) && (s.kind === "voice-line") === speech)
+    .sort((a, b) => (b.kind === c.event_type) - (a.kind === c.event_type) || b.rating - a.rating)
+    .slice(0, 6);
+}
+async function swapCue(takeId) {
+  const c = cueById(sc.cue); if (!c) return;
+  try {
+    await api(`/api/scores/${encodeURIComponent(sc.id)}/cues/${encodeURIComponent(c.id)}/swap`, { take_id: takeId });
+    sc.exhausted = null; await loadScore(); st.sel = takeId; renderAll(); toast("Take swapped. Render to hear it in the edit.");
+  } catch (e) { toast(e.message); }
+}
+async function renderScore() {
+  if (sc.rendering) return;
+  sc.rendering = true; renderAll();
+  try {
+    const job = await api(`/api/scores/${encodeURIComponent(sc.id)}/render`, {});
+    await watchJob(job);
+    await loadScore(); sc.mode = "after"; toast("Scored edit rendered");
+  } catch (e) { toast(e.message); }
+  finally { sc.rendering = false; renderAll(); }
+}
+media.addEventListener("play", () => $("#cueVideo")?.pause());
+
 /* ============ inspector ============ */
 function renderInsp() {
+  if (st.view === "cues") return renderCueInsp();
   const s = byId(st.sel), el = $("#insp"); if (!s) { el.innerHTML = ""; return; }
   const duration = audio.duration.get(s.id), real = duration ? duration.toFixed(2) + " s" : "length pending";
   const parent = s.from && byId(s.from), kids = SOUNDS.filter(x => x.from === s.id);
@@ -495,7 +678,7 @@ function renderUpdate() {
 }
 function renderView() {
   document.querySelectorAll("#views button").forEach(b => (b.classList.toggle("on", b.dataset.view === st.view), b.setAttribute("aria-selected", b.dataset.view === st.view)));
-  ({ library: renderLibrary, map: renderMap, compare: renderCompare, insights: renderInsights })[st.view]();
+  ({ library: renderLibrary, map: renderMap, compare: renderCompare, cues: renderCues, insights: renderInsights })[st.view]();
 }
 function renderAll() {
   SOUNDS = ALL_SOUNDS.filter(s => (st.view === "library" && st.allSounds) || s.project === serverState?.project || s.rating);
@@ -541,7 +724,7 @@ function openKeys() {
       <dt><kbd>Space</kbd></dt><dd>Play / pause</dd><dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>Previous / next sound</dd>
       <dt><kbd>1</kbd>–<kbd>5</kbd></dt><dd>Rate, then play the next unrated</dd><dt><kbd>0</kbd></dt><dd>Clear the rating</dd>
       <dt><kbd>N</kbd></dt><dd>Write a note</dd><dt><kbd>I</kbd></dt><dd>Show / hide details</dd>
-      <dt><kbd>L</kbd> <kbd>M</kbd> <kbd>C</kbd> <kbd>G</kbd></dt><dd>Library, Map, Compare, Insights</dd><dt><kbd>⌘K</kbd></dt><dd>Search</dd></dl></div></div></div>`;
+      <dt><kbd>L</kbd> <kbd>M</kbd> <kbd>C</kbd> <kbd>G</kbd></dt><dd>Library, Map, Compare, Insights</dd><dt><kbd>S</kbd></dt><dd>Cue sheet (Space plays the edit)</dd><dt><kbd>S</kbd> <kbd>⇧S</kbd></dt><dd>In the cue sheet: swap the take / go back</dd><dt><kbd>⌘K</kbd></dt><dd>Search</dd></dl></div></div></div>`;
 }
 function generationRows() {
   if (!generating || ["done", "error"].includes(generating.state)) return "";
@@ -684,10 +867,14 @@ async function openSettings() {
 
 /* ============ events ============ */
 document.addEventListener("click", e => {
-  const t = e.target.closest("button, [data-id], [data-close], canvas[data-play-canvas], label"); if (!t) return;
+  const t = e.target.closest("button, [data-id], [data-close], canvas[data-play-canvas], label, [data-cue-row]"); if (!t) return;
   if (t.matches("[data-close]")) return closeOv();
   const d = t.dataset;
   if (d.play) { e.stopPropagation(); return play(d.play); }
+  if (d.cue) return selectCue(d.cue, true);
+  if (d.cueRow && !e.target.closest("[data-rate]")) return selectCue(d.cueRow, true);
+  if (d.cmode) { sc.mode = d.cmode; return renderView(); }
+  if (d.swap) return swapCue(d.swap);
   if (d.playCanvas) return play(d.playCanvas);
   if (d.rate) { e.stopPropagation(); if (st.sel !== d.rate) st.sel = d.rate; return rate(d.rate, +d.v, false); }
   if (d.scope) { st.allSounds = d.scope === "all"; st.batch = null; return renderAll(); }
@@ -722,6 +909,11 @@ document.addEventListener("click", e => {
     case "tasteSide": st.view = "insights"; $("#app").classList.remove("side-open"); return renderAll();
     case "updateBtn": return updateTaste();
     case "revealBtn": return api("/api/reveal", {id:st.sel}).catch(e => toast(e.message));
+    case "renderBtn": return renderScore();
+    case "seekCueBtn": { const c = cueById(sc.cue); if (c) seekCue(c.start); return; }
+    case "swapNextBtn": return swapStep("next");
+    case "swapBackBtn": return swapStep("back");
+    case "genCueBtn": { const c = cueById(sc.cue); if (c) openNew(c.prompt); return; }
   }
   if (d.id && !e.target.closest("textarea, input, select")) select(d.id, false);
 });
@@ -748,6 +940,7 @@ document.addEventListener("change", e => {
   if (e.target.id === "groupT") { st.group = e.target.checked; renderView(); }
   if (e.target.id === "blindT") { st.blind = e.target.checked; renderView(); }
   if (e.target.id === "cmpSel") { st.cmpBatch = e.target.value; renderView(); }
+  if (e.target.id === "cueScore") { sc.id = e.target.value; sc.data = null; sc.cue = null; renderAll(); }
 });
 document.addEventListener("mousemove", e => {
   if (st.view !== "map" || !e.target.closest("#map")) { if (mapHover) { mapHover = null; drawMap(); $("#tip") && ($("#tip").hidden = true); } return; }
@@ -767,6 +960,14 @@ document.addEventListener("keydown", e => {
   if (e.key === "Enter" && e.target.matches("[data-play-canvas]")) { e.preventDefault(); return play(e.target.dataset.playCanvas); }
   if (e.key === "Enter" && e.target.matches("[data-id]")) { e.preventDefault(); return select(e.target.dataset.id); }
   const k = e.key;
+  if (st.view === "cues" && sc.data) {
+    // In the cue sheet, Space plays the edit and the arrows step through cues; 1 to 5 still rate the selected take.
+    if (e.key === "Enter" && e.target.matches("[data-cue-row]")) { e.preventDefault(); return selectCue(e.target.dataset.cueRow, true); }
+    if (e.code === "KeyS" && sc.cue) { e.preventDefault(); if (!e.repeat) swapStep(e.shiftKey ? "back" : "next"); return; }
+    if (k === " " && !e.target.matches("button, input, video")) { e.preventDefault(); const v = $("#cueVideo"); if (v) v.paused ? v.play().catch(() => {}) : v.pause(); return; }
+    if (k === "ArrowDown" || k === "ArrowUp") { e.preventDefault(); const L = sc.data.cues, i = L.findIndex(c => c.id === sc.cue), nx = L[Math.max(0, Math.min(L.length - 1, i + (k === "ArrowDown" ? 1 : -1)))]; if (nx) selectCue(nx.id, true); return; }
+  }
+  if ((k === "s" || k === "S") && !$("#cuesTab").hidden) { st.view = "cues"; return renderAll(); }
   if (st.view === "compare" && /^[a-f]$/i.test(k)) { const L = SOUNDS.filter(s => s.batch === st.cmpBatch).sort((a, b) => a.n - b.n), s = L["abcdefghijklmnopqrstuvwxyz".indexOf(k.toLowerCase())]; if (s) { st.sel = s.id; renderView(); renderInsp(); play(s.id); } return; }
   if (k === " " && !e.target.matches("button, input")) { e.preventDefault(); play(st.sel); }
   else if (k === "ArrowDown" || k === "ArrowUp") { e.preventDefault(); const L = visible(), i = L.findIndex(x => x.id === st.sel), nx = L[Math.max(0, Math.min(L.length - 1, i + (k === "ArrowDown" ? 1 : -1)))]; if (nx) { select(nx.id); loadPlayer(nx.id, false); } }

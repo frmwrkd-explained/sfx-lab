@@ -63,6 +63,78 @@ in optional Markdown sheets. The old numeric aliases `0` and `-1` are removed;
 memory when read. Ratings and notes save immediately; settlement happens once,
 on the next **Update taste** / `sfx-lab learn`, using the latest stars.
 
+## Sound-design an edit
+
+Install `ffmpeg` and `ffprobe` on PATH, then score a video:
+
+```sh
+sfx-lab score ./edit.mp4 --project my-show
+sfx-lab score ./edit.mp4 --no-agent --plan-only
+# After reviewing the saved cue table and price:
+sfx-lab score --resume <score-id> --yes
+sfx-lab line "Here is the reveal." --voice <existing-voice-id> --at 00:00:03:12 --project my-show
+```
+
+`score` imports a source copy into the lab, detects cuts and brief frame-change
+spikes, and asks the configured agent (normally Claude CLI / Haiku) for specific
+prompts. `--no-agent` uses deterministic prompts. It saves JSON and a Markdown
+cue table, prints the table, reuses matching takes rated at least 4 stars in this
+project, and shows the generation estimate before asking to spend. `--yes` skips
+the question but keeps the default $0.50 batch cost cap from project settings;
+`--max-usd X` explicitly overrides it. Resume keeps successful takes after a partial failure.
+
+The built-in SFX default is `eleven_text_to_sound_v3`. Use `score --sfx-model v2`
+or configure the generator as `elevenlabs-v2` to select v2. SFX estimates show
+40 credits per second plus the existing $0.12/minute dollar estimate; the two
+published units are not a universal exchange rate. Your plan determines billing.
+Agent usage is separate. `line` uses `eleven_v4` with an existing voice id and
+the same approval/cost gate, estimating $0.08/1,000 input characters. It never
+creates a voice clone. Time accepts seconds or `HH:MM:SS:FF`, non-drop-frame at
+the edit's frame rate. Lines go into the latest score in that project; use
+`--score <score-id>` to choose another.
+Rates were checked against the [SFX guide](https://elevenlabs.io/docs/overview/capabilities/sound-effects)
+and [ElevenAPI pricing](https://elevenlabs.io/pricing/api) on 2026-10-28.
+
+Deliverables live in `scores/<project>/<score-id>/`: `<name>.scored.mp4`,
+`<name>.sfx-stem.wav`, cue JSON/Markdown, FCPXML and EDL. The stereo 48 kHz WAV
+stem peaks at or below -3 dBFS. Effects duck by 9 dB under detected speech with
+80 ms ramps. Optional local Whisper needs an installed CLI and a cached
+`tiny.pt` model, or `SFX_LAB_WHISPER_MODEL` pointing to a downloaded model file.
+No model is downloaded automatically. Without Whisper, original voice ducking
+is unavailable and the plan says so; added voice lines still duck the effects.
+Cuts and graphic hits are heuristics and need listening review. The MP4 is an
+H.264/AAC review render with original audio plus the stem, at the probed average
+frame rate; use the preserved source for lossless/HDR finishing.
+
+Open Studio and pick the **Cue sheet** tab to review a score: watch the edit
+before and after, click any cue on the timeline to jump to it, give its take
+stars, swap it for another take, then render again. Stars here teach your taste
+exactly like a normal batch. See [SCORE_SPEC.md](SCORE_SPEC.md) for the JSON
+contract and saved-file schema.
+
+### Import into an editor
+
+Both exports start at `00:00:00:00` and use non-drop-frame labels. Match the
+timeline frame rate and start timecode, including 23.976/29.97 fractional rates.
+The EDL contains marker events and comments, not audio or an editable SFX mix.
+FCPXML links to local media paths; keep the source, library takes and stem
+available, or relink them after moving the lab.
+
+| Editor | What to import | What arrives and what does not |
+|---|---|---|
+| Final Cut Pro | File → Import → XML, choose `.fcpxml` | A project with source picture, cue-id **clip markers**, one audible connected mixed stem, and disabled reference takes named by cue id. The references are raw audio; the stem contains the ducking and peak control. This EDL is not a native Final Cut marker import. |
+| DaVinci Resolve | For markers on an existing timeline: Media Pool → right-click timeline → Timelines → Import → Timeline Markers from EDL. Choose `.edl`. | The Resolve-specific marker comments provide cue names and durations. Set the timeline start to zero, rather than Resolve's common one-hour default. Import `.fcpxml` through File → Import → Timeline for picture/stem clips; marker/disabled-clip translation varies by version, so use the EDL route for markers. Importing the EDL as a normal timeline gives cut events, not the mixed stem. |
+| Premiere Pro | Import the WAV and place it at elapsed zero. For an editable timeline, convert `.fcpxml` to legacy Final Cut Pro XML with a separate tool first. | Premiere cannot directly import modern FCPXML. Its CMX3600 import reads edit events, not Resolve's marker extension, so this EDL does **not** provide Premiere markers or audio clips. Native Premiere marker XML is not exported here. |
+
+These routes are based on [Apple's XML import guide](https://support.apple.com/guide/final-cut-pro/use-xml-to-transfer-projects-verdbd66ae/mac),
+[Apple's clip-marker model](https://developer.apple.com/documentation/professional-video-applications/describing-final-cut-pro-items-in-fcpxml),
+[Adobe's FCPXML conversion requirement](https://helpx.adobe.com/uk/premiere/desktop/organize-media/import-files/migrate-from-final-cut-pro-x.html),
+[Adobe's CMX3600 import documentation](https://helpx.adobe.com/pdf/cs6/premiere_pro_reference.pdf),
+and [Simon Says' documented Resolve marker workflow](https://www.simonsaysai.com/blog/export-for-blackmagic-davinci-resolve-timeline-markers-bc6678d323ac).
+The exports are tested offline for structure and timing. Native import in these
+three editor apps has not been tested in this build; prompt notes and disabled
+reference clips may translate differently. The cue table remains authoritative.
+
 ## Studio
 
 ```sh

@@ -38,7 +38,7 @@ def test_full_cycle_settle_once_and_re_rating(lab: Lab, monkeypatch: pytest.Monk
         workflow.run(lab)
     assert FakeGenerator.calls == []
     path = workflow.run(lab, yes=True)
-    assert len(list(lab.audio_dir.glob("*.wav"))) == 2
+    assert len([p for p in lab.audio_dir.glob("*.wav") if not p.name.startswith("._")]) == 2
     assert not workflow.pending_plans(lab)
     assert "2 unrated" in workflow.status(lab)
     rate_sheet(path)

@@ -735,6 +735,7 @@ function generationRows() {
 let generatingBrief = "";
 function openNew(seed, parent = null) {
   let n = serverState?.defaults.batch_size || 6, brief = seed || "", kind = serverState?.defaults.kind || "sfx";
+  let source = String(serverState?.lab.generator || "").startsWith("epidemic") ? "epidemic" : "elevenlabs";
   const draw = () => {
     $("#overlay").innerHTML = `<div class="scrim" data-close></div><div class="modal" role="dialog" aria-modal="true" aria-label="New batch">
       <div class="m-h"><h2>New batch</h2><button class="icon-btn" data-close aria-label="Close">${I.x}</button></div>
@@ -742,27 +743,28 @@ function openNew(seed, parent = null) {
         <div class="field"><label for="brief">What do you need?</label><textarea id="brief" placeholder="soft UI click for a tech explainer">${esc(brief)}</textarea></div>
         <div class="row2"><div class="field"><label>Sounds</label><div class="stepper"><button id="minus" aria-label="Fewer">−</button><span>${n}</span><button id="plus" aria-label="More">+</button></div></div>
           <div class="field"><label for="kind">Kind</label><div class="select"><select id="kind">${["ui", "sfx", "foley", "ambience"].map(k => `<option value="${k}" ${k === kind ? "selected" : ""}>${k === "ui" || k === "sfx" ? k.toUpperCase() : k[0].toUpperCase() + k.slice(1)}</option>`).join("")}</select>${I.chev}</div></div></div>
+        <div class="field"><label for="source">Source</label><div class="select"><select id="source"><option value="elevenlabs" ${source === "elevenlabs" ? "selected" : ""}>ElevenLabs · make new sounds</option><option value="epidemic" ${source === "epidemic" ? "selected" : ""}>Epidemic Sound · find in library</option></select></div></div>
         <details class="adv"><summary>${I.chevr} Advanced · ${Math.round(n * serverState.lab.explore)} experiments · influence & length from your taste</summary>
           <div class="adv-body"><span>Experiments</span><span>${Math.round(serverState.lab.explore * 100)}% of the batch</span><span>Prompt influence</span><span>${esc(serverState.defaults.influence.join("–"))}</span><span>Length</span><span>${serverState.defaults.length ? esc(serverState.defaults.length.join("–")) + " s" : "Agent decides, 0.5–30 s"}</span><span>Agent</span><span>${esc(serverState.lab.agent)} · ${esc(serverState.lab.model || "Haiku")}</span></div></details>
       </div>
       <div class="m-f"><span class="muted">Planned from your taste profile</span><button class="btn primary" id="planBtn">Plan ${n} sounds</button></div></div>`;
-    const save = () => { brief = $("#brief").value; kind = $("#kind").value; };
+    const save = () => { brief = $("#brief").value; kind = $("#kind").value; source = $("#source").value; };
     $("#minus").onclick = () => { save(); n = Math.max(1, n - 1); draw(); };
     $("#plus").onclick = () => { save(); n = Math.min(12, n + 1); draw(); };
-    $("#planBtn").onclick = () => { save(); if (!brief.trim()) { $("#brief").focus(); return; } showPlan(brief.trim(), n, kind, parent); };
+    $("#planBtn").onclick = () => { save(); if (!brief.trim()) { $("#brief").focus(); return; } showPlan(brief.trim(), n, kind, parent, source); };
     $("#brief").focus();
   };
   draw();
 }
-async function showPlan(brief, n, kind, parent) {
+async function showPlan(brief, n, kind, parent, source) {
   $(".modal .m-b").innerHTML = `<div class="state" role="status"><span class="spinner"></span> Haiku is planning…</div>`;
   $(".modal .m-f").innerHTML = `<span class="muted">Planned from your taste profile</span>`;
   try {
-    const job = await api("/api/plan", { brief, n, kind, ...(parent ? { from:parent } : {}) });
+    const job = await api("/api/plan", { brief, n, kind, ...(source ? { source } : {}), ...(parent ? { from:parent } : {}) });
     const plan = await watchJob(job);
     if (!$(".modal")) return;
-    $(".modal .m-b").innerHTML = `<div class="state">Haiku's plan for “${esc(brief)}”</div><div class="plan">${plan.specs.map((s, i) => `<div><span class="n">${pad(i + 1)}</span><span>${esc(s.prompt)}</span><span class="s">${lenTxt({dur:s.duration_s})} · ${s.prompt_influence.toFixed(2)}${s.explore ? " · exp" : ""}</span></div>`).join("")}</div>`;
-    $(".modal .m-f").innerHTML = `<span class="muted">${plan.over_limit ? `Above your $${serverState.lab.max_usd} limit — raise the limit in Settings` : `About $${plan.estimate_usd.toFixed(3)} on ${esc(serverState.lab.generator)}`}</span><button class="btn ghost" id="backBtn">Back</button><button class="btn primary" id="genBtn" ${plan.over_limit ? "disabled" : ""}>Generate ${plan.specs.length} sounds</button>`;
+    $(".modal .m-b").innerHTML = `<div class="state">Haiku's plan for “${esc(brief)}”</div><div class="plan">${plan.specs.map((s, i) => `<div><span class="n">${pad(i + 1)}</span><span>${s.search && String(plan.generator).startsWith("epidemic") ? `<b>${esc(s.search)}</b> · ` : ""}${esc(s.prompt)}</span><span class="s">${lenTxt({dur:s.duration_s})} · ${s.prompt_influence.toFixed(2)}${s.explore ? " · exp" : ""}</span></div>`).join("")}</div>`;
+    $(".modal .m-f").innerHTML = `<span class="muted">${plan.over_limit ? `Above your $${serverState.lab.max_usd} limit — raise the limit in Settings` : (String(plan.generator).startsWith("epidemic") ? "Epidemic Sound library · included in your plan" : `About $${plan.estimate_usd.toFixed(3)} on ${esc(plan.generator)}`)}</span><button class="btn ghost" id="backBtn">Back</button><button class="btn primary" id="genBtn" ${plan.over_limit ? "disabled" : ""}>Generate ${plan.specs.length} sounds</button>`;
     $("#backBtn").onclick = () => openNew(brief, parent);
     $("#genBtn").onclick = async () => {
       $("#genBtn").disabled = true;
@@ -846,8 +848,10 @@ async function openSettings() {
       <label class="switch"><input id="autoLength" type="checkbox" ${d.length ? "" : "checked"}>Let the model choose length</label>
       <div class="row2">${field("lengthLow", "Length minimum (s)", d.length?.[0] ?? 0.5, 'type="number" min="0.5" max="30" step="0.1" required')}${field("lengthHigh", "Length maximum (s)", d.length?.[1] ?? 30, 'type="number" min="0.5" max="30" step="0.1" required')}</div>
       <div class="field"><label for="agentChoice">Planning and learning</label><div class="select"><select id="agentChoice">${value.claude_available ? `<option value="claude-cli" ${value.agent === "claude-cli" ? "selected" : ""}>Claude Code login</option>` : ""}<option value="anthropic-api" ${value.agent === "anthropic-api" ? "selected" : ""}>Anthropic key</option></select></div></div>
+      <div class="field"><label for="sourceChoice">Default sound source</label><div class="select"><select id="sourceChoice"><option value="elevenlabs" ${String(value.generator).startsWith("epidemic") ? "" : "selected"}>ElevenLabs · make new sounds</option><option value="epidemic" ${String(value.generator).startsWith("epidemic") ? "selected" : ""}>Epidemic Sound · find in library</option></select></div></div>
       <div class="eyebrow">Keys · saved locally</div>
       ${field("elevenlabsKey", "ElevenLabs · " + value.keys.elevenlabs, "", 'type="password" autocomplete="new-password" placeholder="Leave blank to keep current key"')}
+      ${field("epidemicKey", "Epidemic Sound · " + value.keys.epidemic, "", 'type="password" autocomplete="new-password" placeholder="Leave blank to keep current key"')}
       ${field("anthropicKey", "Anthropic (optional) · " + value.keys.anthropic, "", 'type="password" autocomplete="new-password" placeholder="Leave blank to keep current key"')}
     </div><div class="m-f"><span class="muted">Defaults apply to this project</span><button class="btn primary" type="submit">Save settings</button></div></form></div>`;
   $("#defaultKind").focus();
@@ -856,10 +860,11 @@ async function openSettings() {
     try {
       const keys = {};
       if ($("#elevenlabsKey").value) keys.elevenlabs = $("#elevenlabsKey").value;
+      if ($("#epidemicKey").value) keys.epidemic = $("#epidemicKey").value;
       if ($("#anthropicKey").value) keys.anthropic = $("#anthropicKey").value;
       if (Object.keys(keys).length) await api("/api/settings/keys", keys, "PUT");
-      $("#elevenlabsKey").value = ""; $("#anthropicKey").value = "";
-      await api("/api/settings", {agent:$("#agentChoice").value, defaults:{kind:$("#defaultKind").value, batch_size:+$("#defaultCount").value, explore:+$("#defaultExplore").value, max_usd:+$("#defaultCap").value, influence:[+$("#influenceLow").value, +$("#influenceHigh").value], length:$("#autoLength").checked ? null : [+$("#lengthLow").value, +$("#lengthHigh").value]}}, "PUT");
+      $("#elevenlabsKey").value = ""; $("#epidemicKey").value = ""; $("#anthropicKey").value = "";
+      await api("/api/settings", {agent:$("#agentChoice").value, generator:$("#sourceChoice").value, defaults:{kind:$("#defaultKind").value, batch_size:+$("#defaultCount").value, explore:+$("#defaultExplore").value, max_usd:+$("#defaultCap").value, influence:[+$("#influenceLow").value, +$("#influenceHigh").value], length:$("#autoLength").checked ? null : [+$("#lengthLow").value, +$("#lengthHigh").value]}}, "PUT");
       await refresh(); closeOv(); toast("Settings saved");
     } catch (error) { toast(error.message); button.disabled = false; }
   };

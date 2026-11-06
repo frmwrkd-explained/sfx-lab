@@ -24,6 +24,8 @@ class Spec:
     explore: bool = False
     why: str = ""
     from_: str | None = None
+    # Short library search words, used by library sources such as Epidemic Sound.
+    search: str = ""
 
     @classmethod
     def from_dict(cls, d: Any, kind: str = "sfx") -> "Spec | None":
@@ -42,11 +44,14 @@ class Spec:
         if parent is not None and (not isinstance(parent, str) or
                                    not re.fullmatch(r"\d{4}-\d{2}-\d{2}-\d+-\d{2,}", parent)):
             return None
+        search = " ".join(str(d.get("search") or "").split())[:100]
         return cls(prompt, duration, influence, bool(d.get("loop", False)),
                    str(d.get("kind", kind)), bool(d.get("explore", False)),
-                   str(d.get("why", ""))[:200], parent)
+                   str(d.get("why", ""))[:200], parent, search)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["from"] = data.pop("from_")
+        if not data["search"]:
+            del data["search"]  # Only library sources use search words; keep other plans unchanged.
         return data

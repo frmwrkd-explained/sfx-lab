@@ -10,7 +10,10 @@ from .lab import Lab, atomic_write, read_text, write_json
 from .ratings import LOG_LOCK
 from .projects import defaults, get_project, project_path, validate_defaults
 
-KEYS = {"elevenlabs": "ELEVENLABS_API_KEY", "anthropic": "SFX_LAB_ANTHROPIC_KEY"}
+KEYS = {"elevenlabs": "ELEVENLABS_API_KEY", "epidemic": "EPIDEMIC_SOUND_API_KEY",
+        "anthropic": "SFX_LAB_ANTHROPIC_KEY"}
+# Sources Studio can set as the lab default; other generator names stay as configured.
+SOURCES = ("elevenlabs", "epidemic")
 
 
 def key_status() -> dict[str, str]:
@@ -25,7 +28,7 @@ def settings(lab: Lab) -> dict[str, Any]:
     except RuntimeError:
         claude = False
     return {"project": lab.project, "defaults": defaults(lab), "keys": key_status(),
-            "agent": lab.config["agent"], "claude_available": claude}
+            "agent": lab.config["agent"], "generator": lab.config["generator"], "claude_available": claude}
 
 
 def save_settings(lab: Lab, data: dict[str, Any]) -> None:
@@ -33,17 +36,24 @@ def save_settings(lab: Lab, data: dict[str, Any]) -> None:
     agent = data.get("agent", lab.config["agent"])
     if agent not in ("claude-cli", "anthropic-api"):
         raise ValueError("Choose Claude Code login or Anthropic key.")
+    generator = data.get("generator")
+    if generator is not None and generator not in SOURCES:
+        raise ValueError("Choose ElevenLabs or Epidemic Sound as the sound source.")
+    # Keep a custom or versioned generator (e.g. elevenlabs-v2) unless the source really changes.
+    current = lab.config["generator"]
+    if generator is None or current.split("-")[0] == generator:
+        generator = current
     with LOG_LOCK:
         project = get_project(lab)
         write_json(project_path(lab, lab.project), project | {"defaults": project["defaults"] | values})
         config = json.loads(read_text(lab.internal / "config.json"))
-        write_json(lab.internal / "config.json", config | {"agent": agent})
-        lab.config.update(values | {"agent": agent})
+        write_json(lab.internal / "config.json", config | {"agent": agent, "generator": generator})
+        lab.config.update(values | {"agent": agent, "generator": generator})
 
 
 def save_keys(lab: Lab, data: dict[str, Any]) -> dict[str, str]:
     if set(data) - KEYS.keys() or any(not isinstance(v, str) or any(c in v for c in '\r\n\x00') for v in data.values()):
-        raise ValueError("Keys must be single-line text in elevenlabs or anthropic fields.")
+        raise ValueError("Keys must be single-line text in elevenlabs, epidemic or anthropic fields.")
     path = lab.safe_path(".env")
     text = read_text(path) if path.exists() else ""
     for name, value in data.items():

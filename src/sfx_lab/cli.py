@@ -25,6 +25,13 @@ def _planning_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--kind", metavar="KIND")
     parser.add_argument("--specs", type=Path, metavar="FILE")
     parser.add_argument("--verbose", action="store_true")
+    _source_option(parser)
+
+
+def _source_option(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--source", metavar="NAME",
+                        help="Where sounds come from for this plan: elevenlabs (generate) or epidemic "
+                             "(search the Epidemic Sound library). Default: the lab's generator.")
 
 
 def _run_options(parser: argparse.ArgumentParser) -> None:
@@ -96,6 +103,7 @@ def parser() -> argparse.ArgumentParser:
     reuse.add_argument("brief")
     reuse.add_argument("-n", type=int, default=3)
     reuse.add_argument("--generate", action="store_true")
+    _source_option(reuse)
     score = commands.add_parser("score", help="Sound-design an edit and export a stem, video and cue markers")
     score.add_argument("video", type=Path, nargs="?")
     score.add_argument("--project", dest="score_project", metavar="SLUG")
@@ -132,7 +140,8 @@ def main(argv: list[str] | None = None) -> int:
         lab = select_project(lab, getattr(args, "context_project", None) or getattr(args, "score_project", None) or args.project)
         if args.command in ("plan", "batch"):
             data = plan(lab, args.brief, args.n, args.kind, args.specs, emit=_emit,
-                        verbose=args.verbose, from_id=args.from_id, feedback=args.feedback)
+                        verbose=args.verbose, from_id=args.from_id, feedback=args.feedback,
+                        source=args.source)
             if args.command == "batch":
                 run(lab, data["batch"], args.yes, args.max_usd, emit=_emit)
         elif args.command == "run":
@@ -194,7 +203,7 @@ def main(argv: list[str] | None = None) -> int:
             rows = sorted(rows, key=lambda e: e['ts'], reverse=True)[:args.limit]
             _emit(json.dumps(rows, ensure_ascii=False) if args.json else "\n".join(map(row, rows)) or "No matching ratings.")
         elif args.command == "need":
-            need(lab, args.brief, args.n, args.generate, emit=_emit)
+            need(lab, args.brief, args.n, args.generate, emit=_emit, source=args.source)
         elif args.command == "status":
             _emit(status(lab))
         elif args.command == "score":

@@ -254,10 +254,10 @@ def test_studio_project_settings_and_find_endpoints(server: Any, studio_lab: Lab
     assert latest(read_log(studio_lab.ratings_path))[(sound['batch'], sound['n'])]['stars'] == 4
     status, _, result = request(server, '/api/settings', {'defaults': {'batch_size': 2, 'kind': 'foley', 'influence': [.6, .8], 'length': [.5, 1]}, 'agent': 'anthropic-api'}, 'PUT')
     assert status == 200 and result['defaults']['kind'] == 'foley'
-    assert result['keys'] == {'elevenlabs': 'missing', 'anthropic': 'missing'}
+    assert result['keys'] == {'elevenlabs': 'missing', 'epidemic': 'missing', 'anthropic': 'missing'}
     assert request(server, '/api/settings', {'defaults': {'batch_size': -1}}, 'PUT')[0] == 400
     status, _, connected = request(server, '/api/settings/keys', {'elevenlabs': 'offline-test-credential-a', 'anthropic': 'offline-test-credential-b'}, 'PUT')
-    assert status == 200 and connected == {'elevenlabs': 'connected', 'anthropic': 'connected'}
+    assert status == 200 and connected == {'elevenlabs': 'connected', 'epidemic': 'missing', 'anthropic': 'connected'}
     # exFAT ignores chmod; still assert the requested mode on filesystems that enforce it.
     probe = studio_lab.root / 'mode-probe'
     probe.touch()

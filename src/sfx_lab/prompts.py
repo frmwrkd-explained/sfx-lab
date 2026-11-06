@@ -18,10 +18,26 @@ SFX_PROMPT_RULES = """How to write each ElevenLabs prompt, in this order:
 - Stay well under the 450-character ElevenLabs limit."""
 
 
+EPIDEMIC_RULES = """
+## Source: Epidemic Sound library
+These sounds are NOT generated. Each spec is searched in the Epidemic Sound sound-effects library and the best unused match is downloaded.
+- Still write "prompt" as a full description: it records what you were looking for and teaches the taste profile.
+- Add "search" to every spec: 2 to 4 plain English library words, the sound type first (e.g. "whoosh cloth fast", "whoosh air swipe", "impact metal heavy").
+- Give each spec different search words, so each spec finds a different sound. No brand names, no long sentences.
+- duration_s is used to prefer results of about that length; prompt_influence and loop are ignored."""
+
+
 def plan_prompt(taste: Taste, stats_md: str, recent_prompts: list[str], brief: str,
-                kind: str, n: int, explore: float, hot: str = "", good: str = "", bad: str = "") -> str:
+                kind: str, n: int, explore: float, hot: str = "", good: str = "", bad: str = "",
+                source: str = "elevenlabs") -> str:
     experiments = round(n * explore)
     recent = "\n".join(f"- {prompt}" for prompt in recent_prompts[:10]) or "Nothing yet."
+    library = source.startswith("epidemic")
+    extra = EPIDEMIC_RULES if library else ""
+    example = ('[{{"prompt": "...", "search": "whoosh cloth fast", "duration_s": 1.0, "prompt_influence": 0.3, "loop": false, "explore": false, "why": "..."}}]'
+               if library else
+               '[{{"prompt": "...", "duration_s": 1.0, "prompt_influence": 0.3, "loop": false, "explore": false, "why": "..."}}]')
+    example = example.replace("{{", "{").replace("}}", "}")
     return f'''You design sound effects for a video creator who rates every sound. Learn from their taste and propose new sounds.
 
 ## Project hot card
@@ -55,8 +71,9 @@ Write exactly {n} sound specs for ElevenLabs Sound Effects (v3 by default).
 - Set `from` to the id you build on, if any.
 - ElevenLabs has no volume control. Requests for louder/more volume mean closer mic, more punch, fuller body, more presence.
 - loop: true only for beds or ambiences meant to repeat seamlessly.
+{extra}
 Reply with ONLY a JSON array, no prose:
-[{{"prompt": "...", "duration_s": 1.0, "prompt_influence": 0.3, "loop": false, "explore": false, "why": "..."}}]'''
+{example}'''
 
 
 def learn_prompt(taste: Taste, stats_md: str, new_items: list[Event],

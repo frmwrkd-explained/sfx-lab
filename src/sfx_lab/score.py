@@ -290,7 +290,7 @@ def plan_score(lab: Lab, video: Path, no_agent: bool = False, agent: Agent | Non
         ("stem", ".sfx-stem.wav"), ("video", ".scored.mp4"), ("fcpxml", ".fcpxml"), ("edl", ".edl"),
         ("cues_json", ".cues.json"), ("cues_md", ".cues.md"))}
     data = {"version": 1, "id": ident, "project": lab.project, "name": name, "created": datetime.now().isoformat(),
-            "source": str(copied.relative_to(lab.root)), "output_dir": relative, "generator": generator,
+            "source": copied.relative_to(lab.root).as_posix(), "output_dir": relative, "generator": generator,
             "analysis": analysis, "cues": cues, "outputs": outputs, "state": "planned", "render_dirty": True}
     data["estimate"] = estimate(lab, data)
     save_score(lab, data)

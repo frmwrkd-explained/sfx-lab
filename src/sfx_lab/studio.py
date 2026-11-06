@@ -120,7 +120,7 @@ class Studio:
                               "audio_url": ""}
             try:
                 path = sound_file(self.lab, sound)
-                sound["audio_url"] = "/audio/" + quote(str(path.relative_to(self.lab.audio_dir)), safe="/")
+                sound["audio_url"] = "/audio/" + quote(path.relative_to(self.lab.audio_dir).as_posix(), safe="/")
                 stored = cache.get(record["id"], {})
                 if stored.get("signature") == signature(path):
                     sound.update(peaks=stored["peaks"], features=stored["features"])

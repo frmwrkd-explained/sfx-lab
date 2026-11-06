@@ -72,7 +72,8 @@ class Lab:
 
     def safe_path(self, relative: str | Path) -> Path:
         value = Path(relative)
-        if value.is_absolute() or ".." in value.parts or "\\" in str(relative):
+        # Only reject backslashes in raw strings; Path objects use them as separators on Windows.
+        if value.is_absolute() or ".." in value.parts or (isinstance(relative, str) and "\\" in relative):
             raise ValueError("Paths must stay inside the lab.")
         path = (self.root / value).resolve()
         if not path.is_relative_to(self.root):

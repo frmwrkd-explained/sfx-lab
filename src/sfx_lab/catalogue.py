@@ -27,7 +27,7 @@ def append_sound(lab: Lab, plan: dict[str, Any], n: int,
         path = Path(result["path"]).resolve()
         if not path.is_relative_to(lab.audio_dir):
             raise ValueError("Generator audio must stay inside the lab audio directory.")
-        audio = str(path.relative_to(lab.root))
+        audio = path.relative_to(lab.root).as_posix()
     record = {"project": plan.get("project", "general"), "id": f"{plan['batch']}-{n:02d}", "batch": plan["batch"], "n": n,
               "brief": plan.get("brief", ""), "kind": plan.get("kind", "sfx"),
               "generator": plan["generator"], "ref": result.get("ref", ""),
@@ -64,7 +64,7 @@ def sync_catalogue(lab: Lab) -> list[dict[str, Any]]:
                         candidate = lab.safe_path(lab.audio_dir.relative_to(lab.root) / filename)
                         if not candidate.is_relative_to(lab.audio_dir):
                             raise ValueError("Invalid audio path")
-                        audio = str(candidate.relative_to(lab.root))
+                        audio = candidate.relative_to(lab.root).as_posix()
                     error = re.search(r"\*\*Failed:\*\* (.*)", section)
                     created = re.search(r'(?m)^created:\s*"?([0-9T:.,+\-]+)', text.split("---", 2)[1] if text.startswith("---") else "")
                     record = {"project": meta.get("project", "general"), "id": ident, "batch": batch, "n": n, "brief": meta.get("brief", ""),

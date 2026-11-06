@@ -272,6 +272,8 @@ def plan_score(lab: Lab, video: Path, no_agent: bool = False, agent: Agent | Non
     score_media.tool("ffmpeg")
     score_media.tool("ffprobe")
     generator = lab.config["generator"]
+    if generator.startswith("epidemic"):
+        generator = "elevenlabs"  # Cue timing needs made-to-measure sounds, not library search.
     if sfx_model:
         if sfx_model not in ("v2", "v3") or generator not in ("elevenlabs", "elevenlabs-v2", "elevenlabs-v3"):
             raise ValueError("--sfx-model v2/v3 requires the ElevenLabs generator.")

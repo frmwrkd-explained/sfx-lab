@@ -66,7 +66,10 @@ def plan(lab: Lab, brief: str | None = None, n: int | None = None, kind: str | N
          specs_file: Path | None = None, agent: Agent | None = None,
          emit: Emit = print, from_id: str | None = None,
          progress: Callable[[dict[str, Any]], None] | None = None,
-         verbose: bool = False, feedback: str | None = None) -> dict[str, Any]:
+         verbose: bool = False, feedback: str | None = None,
+         source: str | None = None) -> dict[str, Any]:
+    source = source or lab.config["generator"]
+    generator = load_generator(source)  # Fail early on an unknown source.
     parent = show(lab, from_id) if from_id else None
     if feedback is not None and parent is None:
         raise ValueError("--feedback requires --from <id>.")
@@ -86,7 +89,8 @@ def plan(lab: Lab, brief: str | None = None, n: int | None = None, kind: str | N
     prompt = plan_prompt(Taste(taste_slice(lab), taste.notes), "",
                          _recent_prompts(lab, brief), brief, kind, count, settings["explore"],
                          hot_card(lab), "\n".join(row(e) for e in good),
-                         "\n".join(row(e) + "\nFull prompt: " + e["spec"]["prompt"] for e in overlapping_bad))
+                         "\n".join(row(e) + "\nFull prompt: " + e["spec"]["prompt"] for e in overlapping_bad),
+                         source=getattr(generator, "name", source))
     prompt += "\nProject defaults: " + json.dumps(settings)
     if parent:
         rating = parent["ratings"].get(lab.project, {})
@@ -142,18 +146,18 @@ def plan(lab: Lab, brief: str | None = None, n: int | None = None, kind: str | N
             raise ValueError("Invalid parent sound identifier.")
         for spec in specs:
             spec["from"] = from_id
-    generator = load_generator(lab.config["generator"])
     estimate = sum(generator.estimate_usd(spec) for spec in specs)
     data = {"project": lab.project, "batch": lab.next_batch_id(), "brief": brief, "kind": kind,
-            "generator": lab.config["generator"], "created": datetime.now().isoformat(),
+            "generator": source, "created": datetime.now().isoformat(),
             "specs": specs, "estimate_usd": estimate, "over_limit": estimate > settings["max_usd"]}
     write_json(lab.safe_path(f".sfx-lab/plans/{data['batch']}.json"), data)
     for n, spec in enumerate(specs, 1):
         duration = spec["duration_s"]
         length = "auto" if duration is None else f"{duration:g} s"
         experiment = "  [exp]" if spec["explore"] else ""
+        search = f"  [search: {spec['search']}]" if spec.get("search") and source.startswith("epidemic") else ""
         emit(f"{n:02d}  {length} · infl {spec['prompt_influence']:g} · loop "
-             f"{'on' if spec['loop'] else 'off'}{experiment}  {spec['prompt']}")
+             f"{'on' if spec['loop'] else 'off'}{experiment}{search}  {spec['prompt']}")
     emit(f"Estimated cost: ${estimate:.3f} ({data['generator']})")
     if progress:
         progress(data)
@@ -394,7 +398,8 @@ def status(lab: Lab) -> str:
 
 
 def need(lab: Lab, brief: str, n: int = 3, generate: bool = False,
-         emit: Emit = print, agent: Agent | None = None) -> dict[str, Any] | None:
+         emit: Emit = print, agent: Agent | None = None,
+         source: str | None = None) -> dict[str, Any] | None:
     if n < 1:
         raise ValueError("Count must be at least 1.")
     matches = find(lab, brief, min_stars=4, limit=min(100, n))
@@ -404,4 +409,4 @@ def need(lab: Lab, brief: str, n: int = 3, generate: bool = False,
     if reuse:
         emit(f"Reusing {n} rated sounds. Add --generate for new ones.")
         return None
-    return plan(lab, brief, n if generate else n - len(matches), agent=agent, emit=emit)
+    return plan(lab, brief, n if generate else n - len(matches), agent=agent, emit=emit, source=source)

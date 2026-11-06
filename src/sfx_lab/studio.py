@@ -266,8 +266,15 @@ class Studio:
             parent = data.get("from")
             if parent is not None:
                 self.sound(parent)
+            source = data.get("source")
+            if source is not None and source not in ("elevenlabs", "epidemic"):
+                raise APIError(400, "Choose ElevenLabs or Epidemic Sound as the source.")
+            # Keep a versioned default (e.g. elevenlabs-v2) when the chosen source matches it.
+            if source is None or self.lab.config["generator"].split("-")[0] == source:
+                source = self.lab.config["generator"]
             return self.start_job("plan", lambda cb: workflow.plan(lab, brief.strip(), n, kind,
-                                  agent=self.agent, emit=lambda _: None, from_id=parent, progress=cb))
+                                  agent=self.agent, emit=lambda _: None, from_id=parent, progress=cb,
+                                  source=source))
         if method == "POST" and path == "/api/run":
             with self.lock:
                 if any(j["kind"] == "run" and j["state"] in ("queued", "running") for j in self.jobs.values()):

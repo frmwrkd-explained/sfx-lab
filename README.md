@@ -63,6 +63,28 @@ in optional Markdown sheets. The old numeric aliases `0` and `-1` are removed;
 memory when read. Ratings and notes save immediately; settlement happens once,
 on the next **Update taste** / `sfx-lab learn`, using the latest stars.
 
+## Epidemic Sound library
+
+The `epidemic` source finds existing sounds in the
+[Epidemic Sound](https://developers.epidemicsound.com/docs/) sound-effects
+library and downloads them into the lab; it does not generate audio. Create an
+API key in the Epidemic Sound Developer Portal, then paste it in Studio Settings
+(or set `EPIDEMIC_SOUND_API_KEY` in the environment or the lab's `.env`).
+
+```sh
+sfx-lab plan "fast cloth whoosh for cuts" -n 6 --source epidemic
+sfx-lab run --yes
+```
+
+`--source` works on `plan`, `batch` and `need`; Studio's New batch dialog has a
+Source picker, and Settings sets the lab default. For this source the planner
+adds a short `search` field (2–4 library words) to each spec; the full `prompt`
+is still kept for the taste profile. Each spec downloads the best match not yet
+in the lab, preferring results near `duration_s`. The estimate is $0 because
+downloads are covered by your Epidemic Sound plan. Free-tier keys are for
+evaluation only: their content must not be published. `score` always uses
+ElevenLabs.
+
 ## Sound-design an edit
 
 Install `ffmpeg` and `ffprobe` on PATH, then score a video:

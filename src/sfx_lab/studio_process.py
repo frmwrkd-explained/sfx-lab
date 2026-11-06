@@ -113,7 +113,9 @@ def open_studio(lab: Lab) -> str:
     else:
         path.unlink(missing_ok=True)
         log_path = lab.safe_path(".sfx-lab/studio.log")
-        options = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS}
+        # CREATE_NO_WINDOW, not DETACHED_PROCESS: a detached console program (and the
+        # uv launcher's child python) would otherwise get a new, visible console window.
+        options = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW}
                    if os.name == "nt" else {"start_new_session": True})
         # Select the persisted active project even when the caller has an env override.
         env = os.environ.copy()
